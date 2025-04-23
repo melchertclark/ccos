@@ -10,6 +10,7 @@ jobs:
     strategy:
       matrix:
         os: [windows-latest, macos-latest]
+      fail-fast: false  # Allow other jobs to continue if one fails
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v3
@@ -24,35 +25,40 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           
-      - name: Build executable
+      - name: Build executable (Windows)
+        if: matrix.os == 'windows-latest'
+        run: pyinstaller --onefile --name url_scraper_win.exe src/main.py
+          
+      - name: Build executable (macOS)
+        if: matrix.os == 'macos-latest'
+        run: pyinstaller --onefile --name url_scraper_mac src/main.py
+          
+      - name: Prepare distribution
+        shell: bash
         run: |
+          mkdir -p dist_package
+          cp README.txt dist_package/
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            pyinstaller --onefile --name url_scraper_win.exe src/main.py
+            cp dist/url_scraper_win.exe dist_package/
+            cp scripts/RUN_ME.bat dist_package/
           else
-            pyinstaller --onefile --name url_scraper_mac src/main.py
+            cp dist/url_scraper_mac dist_package/
+            cp scripts/RUN_ME.command dist_package/
+            chmod +x dist_package/url_scraper_mac
+            chmod +x dist_package/RUN_ME.command
           fi
           
-      - name: Create distribution
-        run: |
-          mkdir -p dist
-          cp scripts/RUN_ME.bat dist/
-          cp scripts/RUN_ME.command dist/
-          cp README.txt dist/
-          if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            cp dist/url_scraper_win.exe dist/
-          else
-            cp dist/url_scraper_mac dist/
-          fi
-          
-      - name: Upload artifacts
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v3
         with:
           name: dist-${{ matrix.os }}
-          path: dist/
+          path: dist_package/
           
   release:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v3
@@ -62,11 +68,8 @@ jobs:
       - name: Create universal distribution
         run: |
           mkdir -p universal-dist
-          cp artifacts/dist-windows-latest/url_scraper_win.exe universal-dist/
-          cp artifacts/dist-macos-latest/url_scraper_mac universal-dist/
-          cp artifacts/dist-windows-latest/RUN_ME.bat universal-dist/
-          cp artifacts/dist-macos-latest/RUN_ME.command universal-dist/
-          cp artifacts/dist-windows-latest/README.txt universal-dist/
+          cp -r artifacts/dist-windows-latest/* universal-dist/
+          cp -r artifacts/dist-macos-latest/* universal-dist/
           cd universal-dist
           zip -r ../url-scraper_universal.zip *
           
