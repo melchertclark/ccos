@@ -1,0 +1,271 @@
+============================================
+PROJECT REQUIREMENTS DOCUMENT (PRD)
+
+PROJECT TITLE
+
+URL Whiteboard Scraper – Stand-Alone Data-Extraction Utility
+
+REVISION & STATUS
+
+• Document Version: 1.0 (Approved for build)
+• Last Updated: 23 April 2025
+• Author: ChatGPT (drafted for Clark)
+
+TABLE OF CONTENTS
+	1.	Purpose and Objectives
+	2.	Scope and Constraints
+	3.	Stakeholders and Roles
+	4.	Input Data Specification
+	5.	Output Specification
+	6.	Functional Requirements
+	7.	Non-Functional Requirements
+	8.	User Experience and Workflow
+	9.	Error Handling and Logging
+	10.	Technical Architecture and Technology Choices
+	11.	Packaging and Distribution Strategy
+	12.	Acceptance Criteria and Test Matrix
+	13.	Build and Release Process
+	14.	Glossary of Terms
+
+⸻
+
+	1.	PURPOSE AND OBJECTIVES
+
+⸻
+
+The goal of this project is to provide a single-step, cross-platform utility that:
+
+1.1 Prompts a user (on Windows 10/11 or macOS 13+) to select an Excel workbook (.xlsx).
+1.2 Automatically locates a sheet named “URL Whiteboard” within that workbook.
+1.3 Reads a list of web pages (URLs) and associated text labels from the sheet.
+1.4 Visits each web page, retrieves the HTML, converts the content to cleaned plain-text, and concatenates the results into a single UTF-8 text file.
+1.5 Produces an optional log file that lists any URLs that could not be scraped.
+1.6 Reveals the output files to the end user upon completion.
+
+The utility is designed for non-technical teammates who should not need to install Python, libraries, or other prerequisites.
+
+⸻
+
+	2.	SCOPE AND CONSTRAINTS
+
+⸻
+
+IN SCOPE
+• Extraction of textual content from up to fifty (50) web pages per run.
+• Sequential scraping with an optional power-user flag for limited concurrency.
+• Support for Windows 64-bit and macOS (Intel and Apple Silicon).
+
+OUT OF SCOPE
+• Image, video, or PDF extraction.
+• Respecting robots.txt (the utility intentionally ignores it).
+• Complex authentication flows (all target URLs are expected to be public).
+
+⸻
+
+	3.	STAKEHOLDERS AND ROLES
+
+⸻
+
+• End User – Marketing staff or analyst requiring combined web-page text.
+• Maintainer – Internal developer (currently Clark) responsible for occasional updates and binary regeneration.
+• Reviewers – Product or project managers validating that requirements are met.
+
+⸻
+
+	4.	INPUT DATA SPECIFICATION
+
+⸻
+
+WORKBOOK REQUIREMENTS
+• Workbook must contain a sheet with the exact name URL Whiteboard (case-sensitive).
+• The sheet has no header row; data starts in Row 1.
+
+COLUMN LAYOUT
+
+Column	Meaning (Required)	Example	Notes
+A	Label (Tag) for the URL	Homepage	Printed in output header.
+B	Fully-qualified URL	https://www.colum.edu/	Must be non-empty.
+C–…	Ignored	—	No processing is done.
+
+Processing stops at the first empty cell in Column B.
+
+⸻
+
+	5.	OUTPUT SPECIFICATION
+
+⸻
+
+5.1 Primary Output
+• File Name: combined_<YYYY-MM-DD>_<HHMM>.txt
+• Encoding: UTF-8
+• Structure:
+
+----- <Label from Column A> -----
+
+<Plain-text content of corresponding URL>
+
+----- <Next Label> -----
+
+<Plain-text content of next URL>
+
+...
+
+5.2 Secondary Output (Generated Only on Errors)
+• File Name: scrape_log_<YYYY-MM-DD>_<HHMM>.txt
+• Contents: One line per failed URL in the format
+<Label> – <URL> – <Error Description>
+
+Both files are written to the same directory as the selected workbook.
+
+⸻
+
+	6.	FUNCTIONAL REQUIREMENTS
+
+⸻
+
+
+
+ID	Priority	Requirement Description
+F-01	MUST	Launch a file-open dialog immediately upon execution and allow the user to choose a single .xlsx file.
+F-02	MUST	Validate that the workbook contains the required sheet and at least one non-blank URL; otherwise display an error dialog and terminate.
+F-03	MUST	Iterate through each URL, performing an HTTP GET request with a one-second base delay plus ±0.3 s jitter between requests (host-respectful pacing).
+F-04	MUST	Convert HTML to plain text using Readability-LXML with a fallback to BeautifulSoup’s get_text().
+F-05	MUST	Append each cleaned text fragment to the output file, separated by header blocks as shown in Section 5.
+F-06	MUST	After all processing, write any errors to the log file and open the output directory in Finder (macOS) or Explorer (Windows).
+F-07	SHOULD	Display a progress window featuring a determinate progress bar and a Cancel button. The window remains until the user clicks Close.
+F-08	SHOULD	On cancellation, gracefully stop further requests and write partial results.
+F-09	COULD	Provide an optional command-line flag --concurrency N (default 1) to enable limited asynchronous scraping via httpx.AsyncClient.
+
+
+
+⸻
+
+	7.	NON-FUNCTIONAL REQUIREMENTS
+
+⸻
+
+• Portability: No Python interpreter or packages required on the target machine; everything is embedded in the binary.
+• Performance: Complete a 50-URL job in three (3) minutes or less on a 100 Mbps connection.
+• Resource Use: Peak RAM not to exceed 200 MB.
+• Binary Size: Combined universal ZIP ideally below 40 MB.
+• Security: Only outbound HTTP/HTTPS; no inbound ports are opened.
+
+⸻
+
+	8.	USER EXPERIENCE AND WORKFLOW
+
+⸻
+
+	1.	User starts the tool by double-clicking RUN_ME (details in Section 11).
+	2.	A standard OS file picker appears.
+	3.	After file selection, a progress window displays “0 / N URLs processed”.
+	4.	The utility retrieves and converts each page in turn (or concurrently if the user invoked the optional flag).
+	5.	Upon completion (or cancellation), the progress window presents a summary message, and the system file explorer opens with output files highlighted.
+	6.	The user can now open combined_*.txt, copy its contents, and proceed with downstream processing (e.g., GPT-4.1 ingestion).
+
+⸻
+
+	9.	ERROR HANDLING AND LOGGING
+
+⸻
+
+• For any URL that produces an HTTP error, connection timeout, or parsing failure, the utility:
+– Skips the URL,
+– Writes a descriptive entry to scrape_log_*.txt, and
+– Continues processing remaining URLs.
+
+• If the user cancels the run, an informational line “Run cancelled by user after  of  URLs” is appended to the log file.
+
+⸻
+
+	10.	TECHNICAL ARCHITECTURE AND TECHNOLOGY CHOICES
+
+⸻
+
+
+
+Concern	Selected Technology	Rationale
+GUI and Dialogs	tkinter (Python stdlib)	Zero external packages; native look-and-feel.
+HTTP Client	httpx	Modern API, supports synchronous and async modes.
+HTML-to-Text Conversion	readability-lxml, bs4	High-quality boilerplate removal with reliable fallback.
+Packaging	PyInstaller --onefile	Mature cross-platform bundler; embeds Python runtime.
+CI/CD	GitHub Actions (matrix build)	Automates binary generation for Windows and macOS.
+
+
+
+⸻
+
+	11.	PACKAGING AND DISTRIBUTION STRATEGY
+
+⸻
+
+A single downloadable archive url-scraper_universal.zip will be produced.
+The ZIP contains:
+
+• url_scraper_win.exe   — Windows 10/11 x64 executable
+• url_scraper_mac       — macOS 13+ universal binary (Intel + Apple Silicon)
+• RUN_ME.bat            — Windows launcher script that executes the EXE
+• RUN_ME.command        — macOS double-clickable shell script that executes the mac binary
+• README.txt            — Concise usage instructions (≤ 10 lines)
+
+End users download one ZIP, extract, and run RUN_ME appropriate to their OS; no manual choice of binary is required.
+
+⸻
+
+	12.	ACCEPTANCE CRITERIA AND TEST MATRIX
+
+⸻
+
+
+
+Test Case	Expected Result
+Workbook lacks “URL Whiteboard” sheet	Error dialog “Required sheet not found”; utility exits with code 1.
+Sheet present but Column B is empty	Error dialog “No URLs found”; exits with code 1.
+Three valid URLs, one invalid URL	Output file contains three text segments; log lists failing URL; progress reaches 100 %.
+User presses Cancel mid-run	Remaining requests stop; partial combined file and log file are produced; log indicates cancellation.
+Utility executed on macOS 14 (Apple Silicon)	Application launches, completes scrape, and reveals output.
+Utility executed on Windows 11 (x64)	Same as above.
+
+
+
+⸻
+
+	13.	BUILD AND RELEASE PROCESS
+
+⸻
+
+	1.	Local Build (Maintainer):
+
+git clone <repository-url>
+cd url-whiteboard-scraper
+python -m venv .venv && . .venv/bin/activate
+pip install -r requirements.txt
+
+# Generate Windows binary (from Windows runner or cross-compilation container)
+pyinstaller --onefile --name url_scraper_win.exe src/main.py
+
+# Generate macOS binary (run on macOS runner for universal build)
+pyinstaller --onefile --name url_scraper_mac src/main.py
+
+# Assemble distribution directory
+cp scripts/RUN_ME.bat dist/
+cp scripts/RUN_ME.command dist/
+cp README.txt dist/
+zip -j url-scraper_universal.zip dist/*
+
+	2.	Continuous Integration:
+• GitHub Actions matrix (windows-latest, macos-latest) repeat the above steps automatically on tagged commits.
+• The pipeline uploads url-scraper_universal.zip as a release asset.
+
+⸻
+
+	14.	GLOSSARY OF TERMS
+
+⸻
+
+• Label / Tag: Text value in Column A used as the section header in the output file.
+• Readability-LXML: Python package that extracts the main textual content from HTML documents.
+• PyInstaller one-file mode: Option that compiles the Python program and its interpreter into a single executable file.
+
+============================================
+END OF DOCUMENT
