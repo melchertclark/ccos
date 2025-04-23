@@ -6,20 +6,11 @@ on:
       - 'v*'
 
 jobs:
-  build:
-    name: Build ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            artifact_name: url_scraper_win.exe
-            asset_name: url_scraper_win.exe
-          - os: macos-latest
-            artifact_name: url_scraper_mac
-            asset_name: url_scraper_mac
-
+  build-and-release:
+    name: Build and Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v3
 
@@ -33,44 +24,39 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Build with PyInstaller
+      - name: Create distribution directory
+        run: mkdir -p dist
+
+      - name: Copy scripts and README
         run: |
-          python -m PyInstaller --onefile --name ${{ matrix.artifact_name }} src/main.py
+          cp scripts/RUN_ME.bat dist/
+          cp scripts/RUN_ME.command dist/
+          cp README.txt dist/
+          chmod +x dist/RUN_ME.command
 
-      - name: Upload Binary
-        uses: actions/upload-artifact@v3
+      - name: Build Windows executable
+        uses: JackMcKew/pyinstaller-action-windows@main
         with:
-          name: ${{ matrix.os }}-binary
-          path: dist/${{ matrix.artifact_name }}
+          path: .
+          spec: src/main.py
+          requirements: requirements.txt
 
-      - name: Upload Scripts
-        uses: actions/upload-artifact@v3
+      - name: Build macOS executable
+        uses: JackMcKew/pyinstaller-action-macos@main
         with:
-          name: ${{ matrix.os }}-scripts
-          path: |
-            scripts/*
-            README.txt
+          path: .
+          spec: src/main.py
+          requirements: requirements.txt
 
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Download Artifacts
-        uses: actions/download-artifact@v3
-        with:
-          path: artifacts
-
-      - name: Prepare Release Package
+      - name: Copy executables
         run: |
-          mkdir -p release
-          cp artifacts/windows-latest-binary/* release/
-          cp artifacts/macos-latest-binary/* release/
-          cp -r artifacts/windows-latest-scripts/* release/
-          chmod +x release/url_scraper_mac
-          chmod +x release/scripts/RUN_ME.command
-          cd release
+          cp dist/windows/url_scraper_win.exe dist/
+          cp dist/macos/url_scraper_mac dist/
+          chmod +x dist/url_scraper_mac
+
+      - name: Create ZIP package
+        run: |
+          cd dist
           zip -r ../url-scraper_universal.zip *
 
       - name: Create Release
